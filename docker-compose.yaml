@@ -1,0 +1,85 @@
+services:
+  postgresql:
+    image: 'postgres:12.2-alpine'
+    environment:
+      POSTGRES_DB: dev
+      POSTGRES_PASSWORD: dev
+      POSTGRES_USER: dev
+    healthcheck:
+      interval: 10s
+      retries: 10
+      test:
+        - CMD
+        - pg_isready
+        - '-U'
+        - '${POSTGRES_USER}'
+        - '-P'
+        - '${POSTGRES_PASSWORD}'
+      timeout: 45s
+    ports:
+      - '5432:5432'
+    restart: on-failure
+    stdin_open: true
+    tty: true
+    volumes:
+      - './data/init/pg-schema.sql:/docker-entrypoint-initdb.d/init.sql'
+      - './data/postgresql:/var/lib/postgresql/data/'
+    networks:
+      - test-net
+
+  clickhous-server:
+    image: 'yandex/clickhouse-server'
+    environment:
+      CLICKHOUSE_DB: dev
+    healthcheck:
+      test: ['CMD', 'wget', '--spider', '-q', 'localhost:8123/ping']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    ports:
+      - '8123:8123'
+      - '9000:9000'
+      - '9009:9009'
+      - '9004:9004'
+    ulimits:
+      nproc: 65535
+      nofile:
+        soft: 262144
+        hard: 262144
+    restart: on-failure
+    stdin_open: true
+    tty: true
+    volumes:
+      - './data/clickhouse:/var/lib/clickhouse yandex/clickhouse-server'
+      - './data/config/config.xml:/etc/clickhouse-server/config.d/config.xml'
+      - './data/init/ch-schema.sql:/docker-entrypoint-initdb.d/ch-schema.sql'
+    networks:
+      - test-net
+
+  clickhous-client:
+    image: yandex/clickhouse-client
+    command: ['--host', 'server']
+    networks:
+      - test-net
+
+  nrich-app:
+    image: 'node:14.17.0'
+    depends_on:
+      - postgresql
+      - clickhous-server
+    build:
+      context: ./
+      dockerfile: Dockerfile
+    command: npm run start
+    networks:
+      - test-net
+    ports:
+      - '3000:3000'
+    environment:
+      CH_HOST: 'clickhous-server'
+    volumes:
+      - .:/app
+
+networks:
+  test-net:
+    driver: bridge
